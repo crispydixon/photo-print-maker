@@ -95,7 +95,7 @@
 <body>
 <div class="app">
     <h1>2‑up photo</h1>
-    <div class="subhead">side‑by‑side · 6×4 · no upscaling</div>
+    <div class="subhead">side‑by‑side · 6×4 · safe margin</div>
 
     <div class="upload-row">
         <div class="photo-slot" id="slotLeft" role="button" tabindex="0" aria-label="Upload left photo">
@@ -129,7 +129,7 @@
     <div class="info-text">
         Photos scaled to equal height (downscale only).<br>
         Landscape images auto‑rotated to portrait.<br>
-        6×4 aspect ratio · white borders added if needed · max 3600×2400.
+        6×4 aspect ratio · ~3% safe margin · max 3600×2400.
     </div>
     <div id="statusMessage" class="status-msg"></div>
 </div>
@@ -172,6 +172,12 @@
         // Preview bounds (display only, not export).
         const PREVIEW_MAX_WIDTH = 1200;
         const PREVIEW_MAX_HEIGHT = 800;
+
+        // Safe margin as a fraction of the canvas's SHORT side (height).
+        // 0.03 = 3% ≈ 0.12" on a 4" tall print (about ⅛ inch).
+        // The photos are placed inside this margin; it's kept white so a
+        // printer/lab auto-crop lands on white, not on a photo edge.
+        const SAFE_MARGIN_FRACTION = 0.03;
 
         function setStatus(text, isError = false) {
             statusMsg.textContent = text;
@@ -350,15 +356,42 @@
         }
 
         // ----------------------------------------------------------------
-        //  Layout logic (no upscaling; canvas sized to composite; 3:2 kept
-        //  by adding the MINIMUM white border needed; final cap at 3600×2400
-        //  scales the WHOLE canvas down uniformly — never up).
+        //  Layout logic
+        //  ----------------------------------------------------------------
+        //  Structure, from outside in:
+        //
+        //    ┌──────────────── canvas (3:2, ≤ 3600×2400) ───────────────┐
+        //    │  ╔═════════════ safe margin (white) ══════════════╗      │
+        //    │  ║                                                  ║      │
+        //    │  ║     ┌──── left ────┐  gap  ┌──── right ────┐    ║      │
+        //    │  ║     │              │       │               │    ║      │
+        //    │  ║     │    photo     │       │     photo     │    ║      │
+        //    │  ║     │              │       │               │    ║      │
+        //    │  ║     └──────────────┘       └───────────────┘    ║      │
+        //    │  ║                                                  ║      │
+        //    │  ╚══════════════════════════════════════════════════╝      │
+        //    └───────────────────────────────────────────────────────────┘
+        //
+        //  The composite (two photos + gap) is scaled down to fit inside
+        //  the canvas minus the safe margin, preserving its aspect ratio.
+        //  Never upscaled. The canvas itself is always 3:2.
         // ----------------------------------------------------------------
         function computeLayout(maxW, maxH) {
+            // Canvas is 3:2, sized as large as possible within maxW × maxH.
+            // Because maxW/maxH is exactly 3:2, the canvas ends up exactly
+            // maxW × maxH — but we compute it generically so the function
+            // works for the preview bounds too.
+            let canvasW, canvasH;
+            if (maxW / maxH > OUTPUT_ASPECT) {
+                canvasH = maxH;
+                canvasW = Math.round(canvasH * OUTPUT_ASPECT);
+            } else {
+                canvasW = maxW;
+                canvasH = Math.round(canvasW / OUTPUT_ASPECT);
+            }
+
             if (!leftImage || !rightImage) {
-                // Empty placeholder — a plain 3:2 preview area.
-                const w = Math.min(maxW, 600);
-                return { canvasW: w, canvasH: Math.round(w / OUTPUT_ASPECT), empty: true };
+                return { canvasW, canvasH, empty: true };
             }
 
             const leftEff  = getEffectiveDimensions(leftImage);
@@ -372,46 +405,30 @@
             const naturalRightW = rightEff.width * (targetHeight / rightEff.height);
             const naturalTotalW = naturalLeftW + GAP_PX + naturalRightW;
 
-            // Composite = the two photos side-by-side with the gap, at natural scale.
-            const compW = naturalTotalW;
-            const compH = targetHeight;
-            const compAspect = compW / compH;
+            // The composite (two photos + gap) must fit inside the canvas
+            // minus the safe margin on all sides.
+            const margin = Math.round(canvasH * SAFE_MARGIN_FRACTION);
+            const availW = canvasW - 2 * margin;
+            const availH = canvasH - 2 * margin;
 
-            // Choose canvas dimensions so:
-            //   • Aspect ratio is exactly 3:2.
-            //   • Composite is drawn at natural scale (no upscaling).
-            //   • White borders fill only the difference in aspect ratio.
-            let canvasW, canvasH;
-            if (compAspect > OUTPUT_ASPECT) {
-                // Composite is WIDER than 3:2 → canvas width = composite width,
-                // add white top/bottom borders to reach 3:2.
-                canvasW = compW;
-                canvasH = compW / OUTPUT_ASPECT;
-            } else {
-                // Composite is TALLER (or exactly) than 3:2 → canvas height =
-                // composite height, add white left/right borders to reach 3:2.
-                canvasH = compH;
-                canvasW = compH * OUTPUT_ASPECT;
-            }
+            // Fit the composite inside the available area, preserving aspect.
+            // Never upscale (cap at 1).
+            const fitScale = Math.min(
+                1,
+                availW / naturalTotalW,
+                availH / targetHeight
+            );
 
-            // Cap the final resolution at maxW × maxH by scaling the whole
-            // canvas down uniformly. This never upscales (capScale ≤ 1),
-            // and because the canvas is already 3:2, the scaled result is
-            // still exactly 3:2.
-            const capScale = Math.min(1, maxW / canvasW, maxH / canvasH);
-            canvasW = Math.round(canvasW * capScale);
-            canvasH = Math.round(canvasH * capScale);
+            const drawLeftW  = naturalLeftW  * fitScale;
+            const drawRightW = naturalRightW * fitScale;
+            const drawH      = targetHeight  * fitScale;
+            const gap        = GAP_PX        * fitScale;
 
-            // Photos are drawn at (composite scale × capScale). Composite
-            // itself is at natural scale; capScale shrinks it if the canvas
-            // was capped.
-            const drawLeftW  = naturalLeftW  * capScale;
-            const drawRightW = naturalRightW * capScale;
-            const drawH      = compH         * capScale;
-            const gap        = GAP_PX        * capScale;
-
-            // Centre the composite on the canvas.
             const totalW = drawLeftW + gap + drawRightW;
+
+            // Centre the composite on the canvas (which leaves equal white
+            // margins on all sides when the composite fits exactly, and a
+            // larger margin on one axis when aspect ratios differ).
             const startX = (canvasW - totalW) / 2;
             const startY = (canvasH - drawH) / 2;
 
@@ -485,7 +502,7 @@
                 link.click();
                 document.body.removeChild(link);
                 setTimeout(() => URL.revokeObjectURL(blobUrl), 200);
-                setStatus(`✓ Exported ${layout.canvasW} × ${layout.canvasH} px (6×4)`);
+                setStatus(`✓ Exported ${layout.canvasW} × ${layout.canvasH} px (6×4 + margin)`);
                 setTimeout(() => setStatus(''), 3000);
             }, 'image/jpeg', 1.0);
         }
