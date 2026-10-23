@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>2‑up photo layout · print & save</title>
+
+    <link rel="manifest" href="./manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="2-up Photo">
+    <meta name="theme-color" content="#007aff">
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #f5f5f7;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 16px; min-height: 100vh;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: #1d1d1f;
+        }
+        .app {
+            max-width: 500px; width: 100%; background: #ffffff;
+            border-radius: 32px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08), 0 6px 12px rgba(0, 0, 0, 0.05);
+            padding: 24px 20px 28px;
+        }
+        h1 { font-size: 1.7rem; font-weight: 600; letter-spacing: -0.02em; text-align: center; margin-bottom: 6px; }
+        .subhead { text-align: center; font-size: 0.95rem; color: #6e6e73; margin-bottom: 22px; border-bottom: 1px solid #e9e9ed; padding-bottom: 16px; }
+        .upload-row { display: flex; gap: 14px; margin-bottom: 20px; }
+        .photo-slot {
+            flex: 1; background: #f9f9fb; border-radius: 18px;
+            border: 1.5px dashed #c6c6cc; padding: 12px 6px 10px;
+            display: flex; flex-direction: column; align-items: center;
+            transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+            cursor: pointer; outline: none;
+        }
+        .photo-slot:active { background: #f0f0f5; border-color: #007aff; }
+        .photo-slot.filled { border-style: solid; border-color: #007aff; background: #ffffff; }
+        .photo-slot.focus-target { box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.25); border-color: #007aff; }
+        .slot-label { font-size: 0.8rem; font-weight: 500; color: #6e6e73; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.02em; }
+        .preview-thumb {
+            width: 80px; height: 80px; border-radius: 12px; background: #e9e9ed;
+            display: flex; align-items: center; justify-content: center;
+            overflow: hidden; font-size: 2rem; color: #8e8e93; margin-bottom: 6px;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.02);
+        }
+        .preview-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; background: #ffffff; }
+        .file-input { display: none; }
+        .slot-hint { font-size: 0.7rem; color: #8e8e93; text-align: center; margin-bottom: 6px; }
+        .paste-btn {
+            font-size: 0.72rem; font-weight: 600; color: #007aff; background: #eaf4ff;
+            border: none; border-radius: 20px; padding: 4px 12px; cursor: pointer;
+            -webkit-tap-highlight-color: transparent; font-family: inherit;
+        }
+        .paste-btn:active { background: #d4e8ff; }
+        #pasteCatcher {
+            position: absolute; left: -9999px; top: 0; width: 1px; height: 1px;
+            opacity: 0; border: none; outline: none; resize: none; overflow: hidden;
+            font-size: 16px; -webkit-user-select: text; user-select: text;
+        }
+        .action-buttons { display: flex; gap: 12px; margin-top: 6px; margin-bottom: 24px; }
+        .btn {
+            flex: 1; padding: 14px 10px; border-radius: 40px; border: none;
+            font-size: 1rem; font-weight: 500; background: #f2f2f7; color: #1d1d1f;
+            transition: opacity 0.2s, background 0.2s; text-align: center;
+            cursor: pointer; -webkit-tap-highlight-color: transparent; font-family: inherit;
+        }
+        .btn-primary { background: #007aff; color: white; font-weight: 600; }
+        .btn-primary:active { background: #005bbf; }
+        .btn:active { opacity: 0.7; }
+        .btn:disabled { opacity: 0.4; pointer-events: none; cursor: default; }
+        .canvas-container {
+            background: #f5f5f7; border-radius: 20px; padding: 16px 10px;
+            display: flex; justify-content: center; align-items: center;
+            margin-bottom: 12px; min-height: 200px;
+            box-shadow: inset 0 1px 4px rgba(0,0,0,0.02);
+        }
+        #previewCanvas {
+            max-width: 100%; height: auto; border-radius: 8px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.1); background: #ffffff;
+            display: block; width: 100%; max-height: 320px; object-fit: contain;
+        }
+        .info-text { text-align: center; font-size: 0.75rem; color: #8e8e93; margin-top: 8px; line-height: 1.4; }
+        .cut-line-note {
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            font-size: 0.72rem; color: #6e6e73; margin: 8px 0 4px;
+        }
+        .cut-line-note span { background: #e9e9ed; padding: 3px 10px; border-radius: 30px; }
+        .gap-indicator { font-weight: 600; color: #007aff; }
+        .status-msg { font-size: 0.8rem; text-align: center; min-height: 20px; color: #007aff; margin-top: 10px; font-weight: 500; }
+    </style>
+</head>
+<body>
+<div class="app">
+    <h1>2‑up photo</h1>
+    <div class="subhead">side‑by‑side · 6×4 · white borders</div>
+
+    <div class="upload-row">
+        <div class="photo-slot" id="slotLeft" role="button" tabindex="0" aria-label="Upload left photo">
+            <div class="slot-label">Left</div>
+            <div class="preview-thumb" id="thumbLeft"><span>＋</span></div>
+            <div class="slot-hint">tap to choose</div>
+            <button class="paste-btn" id="pasteLeft" type="button">Paste</button>
+            <input type="file" id="fileLeft" class="file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp" />
+        </div>
+        <div class="photo-slot" id="slotRight" role="button" tabindex="0" aria-label="Upload right photo">
+            <div class="slot-label">Right</div>
+            <div class="preview-thumb" id="thumbRight"><span>＋</span></div>
+            <div class="slot-hint">tap to choose</div>
+            <button class="paste-btn" id="pasteRight" type="button">Paste</button>
+            <input type="file" id="fileRight" class="file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp" />
+        </div>
+    </div>
+
+    <div class="action-buttons">
+        <button class="btn" id="resetBtn" aria-label="Reset all">Reset</button>
+        <button class="btn btn-primary" id="exportBtn" disabled>Save JPEG</button>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="previewCanvas" width="1200" height="800"></canvas>
+    </div>
+    <div class="cut-line-note">
+        <span>✂️ thin gap = cut line</span>
+        <span class="gap-indicator" id="gapDisplay">3px</span>
+    </div>
+    <div class="info-text">
+        Photos scaled to equal height, side‑by‑side.<br>
+        Landscape images auto‑rotated to portrait.<br>
+        6×4 (3:2) output · white borders if needed · max 3600×2400.
+    </div>
+    <div id="statusMessage" class="status-msg"></div>
+</div>
+
+<textarea id="pasteCatcher" aria-hidden="true" tabindex="-1"></textarea>
+
+<script>
+    (function() {
+        const slotLeft = document.getElementById('slotLeft');
+        const slotRight = document.getElementById('slotRight');
+        const fileLeft = document.getElementById('fileLeft');
+        const fileRight = document.getElementById('fileRight');
+        const thumbLeft = document.getElementById('thumbLeft');
+        const thumbRight = document.getElementById('thumbRight');
+        const pasteLeftBtn = document.getElementById('pasteLeft');
+        const pasteRightBtn = document.getElementById('pasteRight');
+        const pasteCatcher = document.getElementById('pasteCatcher');
+        const resetBtn = document.getElementById('resetBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const previewCanvas = document.getElementById('previewCanvas');
+        const ctx = previewCanvas.getContext('2d');
+        const gapDisplay = document.getElementById('gapDisplay');
+        const statusMsg = document.getElementById('statusMessage');
+
+        let leftImage = null;
+        let rightImage = null;
+        let pasteTarget = 'left';
+
+        const GAP_PX = 3;
+        gapDisplay.textContent = GAP_PX + 'px';
+
+        // 6×4 aspect ratio (3:2 landscape).
+        const OUTPUT_ASPECT = 3 / 2;
+
+        // Max output dimensions. The final canvas is always 3:2, sized to fit
+        // within these bounds. Larger layouts are scaled down uniformly.
+        const MAX_OUTPUT_WIDTH  = 3600;
+        const MAX_OUTPUT_HEIGHT = 2400;
+
+        // Preview bounds (display only, not export).
+        const PREVIEW_MAX_WIDTH = 1200;
+        const PREVIEW_MAX_HEIGHT = 800;
+
+        function setStatus(text, isError = false) {
+            statusMsg.textContent = text;
+            statusMsg.style.color = isError ? '#c0392b' : '#007aff';
+            if (!text) statusMsg.textContent = '';
+        }
+        function updateFocusHighlight() {
+            slotLeft.classList.toggle('focus-target', pasteTarget === 'left');
+            slotRight.classList.toggle('focus-target', pasteTarget === 'right');
+        }
+        function setPasteTarget(which) {
+            pasteTarget = which;
+            updateFocusHighlight();
+        }
+        function focusPasteCatcher(which) {
+            setPasteTarget(which);
+            pasteCatcher.value = '';
+            pasteCatcher.focus();
+        }
+        function updateExportState() {
+            exportBtn.disabled = !(leftImage && rightImage);
+        }
+
+        function clearLeft() {
+            revokeImageURL(leftImage);
+            leftImage = null;
+            thumbLeft.innerHTML = '<span>＋</span>';
+            slotLeft.classList.remove('filled');
+            fileLeft.value = '';
+            updateExportState();
+            drawPreview();
+        }
+        function clearRight() {
+            revokeImageURL(rightImage);
+            rightImage = null;
+            thumbRight.innerHTML = '<span>＋</span>';
+            slotRight.classList.remove('filled');
+            fileRight.value = '';
+            updateExportState();
+            drawPreview();
+        }
+        function resetAll() {
+            clearLeft();
+            clearRight();
+            setStatus('');
+            drawPreview();
+        }
+
+        function loadImageFromFile(file) {
+            return new Promise((resolve, reject) => {
+                if (!file || !file.type.startsWith('image/')) {
+                    reject(new Error('Not an image file'));
+                    return;
+                }
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    img._objectURL = url;
+                    resolve(img);
+                };
+                img.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    reject(new Error('Failed to load image'));
+                };
+                img.src = url;
+            });
+        }
+        function revokeImageURL(img) {
+            if (img && img._objectURL) {
+                URL.revokeObjectURL(img._objectURL);
+                img._objectURL = null;
+            }
+        }
+
+        async function assignImageToSlot(file, which) {
+            try {
+                setStatus('Loading photo…');
+                const img = await loadImageFromFile(file);
+                if (which === 'left') {
+                    revokeImageURL(leftImage);
+                    leftImage = img;
+                    thumbLeft.innerHTML = '';
+                    const t = document.createElement('img');
+                    t.src = img._objectURL;
+                    t.alt = 'Left photo';
+                    thumbLeft.appendChild(t);
+                    slotLeft.classList.add('filled');
+                } else {
+                    revokeImageURL(rightImage);
+                    rightImage = img;
+                    thumbRight.innerHTML = '';
+                    const t = document.createElement('img');
+                    t.src = img._objectURL;
+                    t.alt = 'Right photo';
+                    thumbRight.appendChild(t);
+                    slotRight.classList.add('filled');
+                }
+                setStatus('');
+                updateExportState();
+                drawPreview();
+            } catch (err) {
+                setStatus('Could not load photo', true);
+                console.error(err);
+            }
+        }
+
+        async function handleLeftFile(e) {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setPasteTarget('left');
+            await assignImageToSlot(file, 'left');
+        }
+        async function handleRightFile(e) {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setPasteTarget('right');
+            await assignImageToSlot(file, 'right');
+        }
+
+        function getImageFileFromClipboard(e) {
+            const items = e.clipboardData?.items;
+            if (items) {
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    if (item.kind === 'file' && item.type.startsWith('image/')) {
+                        const file = item.getAsFile();
+                        if (file) return file;
+                    }
+                }
+            }
+            const files = e.clipboardData?.files;
+            if (files && files.length) {
+                for (let i = 0; i < files.length; i++) {
+                    if (files[i].type.startsWith('image/')) return files[i];
+                }
+            }
+            return null;
+        }
+
+        async function handlePaste(e) {
+            const file = getImageFileFromClipboard(e);
+            if (!file) return;
+            e.preventDefault();
+
+            let target = pasteTarget;
+            if (!leftImage && rightImage) target = 'left';
+            else if (leftImage && !rightImage) target = 'right';
+
+            await assignImageToSlot(file, target);
+
+            if (target === 'left' && !rightImage) setPasteTarget('right');
+            else if (target === 'right' && !leftImage) setPasteTarget('left');
+        }
+
+        // Visual (post-rotation) footprint of an image.
+        function getEffectiveDimensions(img) {
+            const landscape = img.width > img.height;
+            return landscape
+                ? { width: img.height, height: img.width, rotate: true }
+                : { width: img.width,  height: img.height, rotate: false };
+        }
+
+        // Draw img so its visual bounding box occupies (destX, destY, visW, visH).
+        // Landscape images are rotated 90° CW.
+        function drawImageRotated(ctx, img, destX, destY, visW, visH) {
+            const landscape = img.width > img.height;
+            if (!landscape) {
+                ctx.drawImage(img, destX, destY, visW, visH);
+                return;
+            }
+            ctx.save();
+            ctx.translate(destX + visW, destY);   // visual top-right corner
+            ctx.rotate(Math.PI / 2);              // 90° CW
+            ctx.drawImage(img, 0, 0, visH, visW); // local w=visH, h=visW
+            ctx.restore();
+        }
+
+        // ----------------------------------------------------------------
+        //  Compute layout inside a 3:2 canvas.
+        //  Returns:
+        //    canvasW, canvasH          – the fixed 3:2 canvas dimensions
+        //    leftX, rightX, y          – placement of each photo
+        //    drawW_L, drawW_R, drawH   – sizes of each photo
+        //    gap                       – scaled gap
+        //  If photos aren't loaded, returns null.
+        // ----------------------------------------------------------------
+        function computeLayout(maxW, maxH) {
+            // Choose canvas dims at 3:2, capped at maxW × maxH.
+            let canvasW = maxW;
+            let canvasH = Math.round(canvasW / OUTPUT_ASPECT);
+            if (canvasH > maxH) {
+                canvasH = maxH;
+                canvasW = Math.round(canvasH * OUTPUT_ASPECT);
+            }
+
+            if (!leftImage || !rightImage) {
+                return { canvasW, canvasH, empty: true };
+            }
+
+            const leftEff  = getEffectiveDimensions(leftImage);
+            const rightEff = getEffectiveDimensions(rightImage);
+
+            // Equal height = smaller of the two effective heights.
+            const targetHeight = Math.min(leftEff.height, rightEff.height);
+
+            // Natural (unscaled) widths at that equal height.
+            const naturalLeftW  = leftEff.width  * (targetHeight / leftEff.height);
+            const naturalRightW = rightEff.width * (targetHeight / rightEff.height);
+            const naturalTotalW = naturalLeftW + GAP_PX + naturalRightW;
+
+            // Fit that composite inside the 3:2 canvas, preserving aspect ratio.
+            // We fit against both dimensions and take the tighter constraint.
+            const fitScaleW = canvasW / naturalTotalW;
+            const fitScaleH = canvasH / targetHeight;
+            const fitScale  = Math.min(fitScaleW, fitScaleH, 1); // no upscaling
+
+            const drawLeftW  = naturalLeftW  * fitScale;
+            const drawRightW = naturalRightW * fitScale;
+            const drawH      = targetHeight * fitScale;
+            const gap        = GAP_PX * fitScale;
+            const totalW     = drawLeftW + gap + drawRightW;
+
+            // Center the composite horizontally and vertically on the canvas.
+            const startX = (canvasW - totalW) / 2;
+            const startY = (canvasH - drawH) / 2;
+
+            return {
+                canvasW, canvasH,
+                leftX: startX,
+                rightX: startX + drawLeftW + gap,
+                y: startY,
+                drawLeftW, drawRightW, drawH,
+                gap,
+                empty: false
+            };
+        }
+
+        function drawPreview() {
+            // Preview uses a scaled-down 3:2 canvas so the user sees the real framing.
+            const layout = computeLayout(PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT);
+
+            previewCanvas.width  = layout.canvasW;
+            previewCanvas.height = layout.canvasH;
+
+            // White paper background
+            ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+
+            if (layout.empty) {
+                ctx.font = '16px -apple-system, BlinkMacSystemFont, sans-serif';
+                ctx.fillStyle = '#8e8e93';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('Upload two photos', previewCanvas.width/2, previewCanvas.height/2);
+                return;
+            }
+
+            drawImageRotated(ctx, leftImage,  layout.leftX,  layout.y, layout.drawLeftW,  layout.drawH);
+            drawImageRotated(ctx, rightImage, layout.rightX, layout.y, layout.drawRightW, layout.drawH);
+        }
+
+        function exportFullRes() {
+            if (!leftImage || !rightImage) {
+                setStatus('Please load both photos first', true);
+                return;
+            }
+
+            const layout = computeLayout(MAX_OUTPUT_WIDTH, MAX_OUTPUT_HEIGHT);
+
+            const fullCanvas = document.createElement('canvas');
+            fullCanvas.width  = layout.canvasW;
+            fullCanvas.height = layout.canvasH;
+            const fullCtx = fullCanvas.getContext('2d');
+
+            // White paper — also fills any border areas around the photos.
+            fullCtx.fillStyle = '#ffffff';
+            fullCtx.fillRect(0, 0, layout.canvasW, layout.canvasH);
+
+            drawImageRotated(fullCtx, leftImage,  layout.leftX,  layout.y, layout.drawLeftW,  layout.drawH);
+            drawImageRotated(fullCtx, rightImage, layout.rightX, layout.y, layout.drawRightW, layout.drawH);
+
+            const timestamp = new Date().toISOString().slice(0,19).replace(/[:T]/g, '-');
+            const filename = `2up-6x4-${timestamp}.jpg`;
+
+            fullCanvas.toBlob(function(blob) {
+                if (!blob) {
+                    setStatus('Export failed — try again', true);
+                    return;
+                }
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = filename;
+                link.href = blobUrl;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 200);
+                setStatus(`✓ Exported ${layout.canvasW} × ${layout.canvasH} px (6×4)`);
+                setTimeout(() => setStatus(''), 3000);
+            }, 'image/jpeg', 1.0);
+        }
+
+        slotLeft.addEventListener('click', (e) => {
+            if (e.target.closest('.paste-btn')) return;
+            setPasteTarget('left');
+            fileLeft.click();
+        });
+        slotRight.addEventListener('click', (e) => {
+            if (e.target.closest('.paste-btn')) return;
+            setPasteTarget('right');
+            fileRight.click();
+        });
+        slotLeft.addEventListener('focus', () => setPasteTarget('left'));
+        slotRight.addEventListener('focus', () => setPasteTarget('right'));
+        slotLeft.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault(); setPasteTarget('left'); fileLeft.click();
+            }
+        });
+        slotRight.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault(); setPasteTarget('right'); fileRight.click();
+            }
+        });
+
+        pasteLeftBtn.addEventListener('click', (e) => { e.stopPropagation(); focusPasteCatcher('left'); });
+        pasteRightBtn.addEventListener('click', (e) => { e.stopPropagation(); focusPasteCatcher('right'); });
+
+        fileLeft.addEventListener('change', handleLeftFile);
+        fileRight.addEventListener('change', handleRightFile);
+
+        resetBtn.addEventListener('click', resetAll);
+        exportBtn.addEventListener('click', exportFullRes);
+
+        pasteCatcher.addEventListener('paste', handlePaste);
+        document.addEventListener('paste', handlePaste);
+
+        window.addEventListener('beforeunload', () => {
+            revokeImageURL(leftImage);
+            revokeImageURL(rightImage);
+        });
+
+        [slotLeft, slotRight].forEach(slot => {
+            slot.addEventListener('dragover', (e) => e.preventDefault());
+            slot.addEventListener('drop', (e) => e.preventDefault());
+        });
+        slotLeft.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files?.[0];
+            if (file && file.type.startsWith('image/')) {
+                setPasteTarget('left');
+                await assignImageToSlot(file, 'left');
+            }
+        });
+        slotRight.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files?.[0];
+            if (file && file.type.startsWith('image/')) {
+                setPasteTarget('right');
+                await assignImageToSlot(file, 'right');
+            }
+        });
+
+        setPasteTarget('left');
+        drawPreview();
+    })();
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => {
+      console.warn('SW registration failed:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>
