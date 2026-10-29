@@ -62,12 +62,15 @@
             font-size: 16px; -webkit-user-select: text; user-select: text;
         }
 
-        /* layout toggle row */
-        .toggle-row { margin-bottom: 22px; }
+        .toggle-row { margin-bottom: 18px; }
         .toggle-label {
             font-size: 0.7rem; font-weight: 500; color: #8e8e93;
             text-transform: uppercase; letter-spacing: 0.04em;
             margin-bottom: 6px; padding-left: 4px;
+            display: flex; justify-content: space-between; align-items: baseline;
+        }
+        .toggle-label .value {
+            text-transform: none; letter-spacing: 0; color: #007aff; font-weight: 600;
         }
         .layout-toggle {
             display: flex;
@@ -99,6 +102,53 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
         .layout-option:active { opacity: 0.7; }
+
+        /* Slider */
+        .slider-wrap {
+            background: #f2f2f7;
+            border-radius: 14px;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .slider-wrap input[type="range"] {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: #d1d1d6;
+            outline: none;
+        }
+        .slider-wrap input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 0.5px solid rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            cursor: pointer;
+        }
+        .slider-wrap input[type="range"]::-moz-range-thumb {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 0.5px solid rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            cursor: pointer;
+        }
+        .slider-wrap .slider-value {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #007aff;
+            min-width: 44px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
 
         .action-buttons { display: flex; gap: 12px; margin-top: 6px; margin-bottom: 24px; }
         .btn {
@@ -135,7 +185,7 @@
 <body>
 <div class="app">
     <h1>2‑up photo</h1>
-    <div class="subhead">6×4 · safe margin · no crop</div>
+    <div class="subhead">6×4 · outer‑edge · gap in middle</div>
 
     <div class="upload-row">
         <div class="photo-slot" id="slotLeft" role="button" tabindex="0" aria-label="Upload left photo">
@@ -164,10 +214,13 @@
     </div>
 
     <div class="toggle-row">
-        <div class="toggle-label">Border</div>
-        <div class="layout-toggle" role="group" aria-label="Border">
-            <button class="layout-option active" id="borderOn" type="button" data-border="on">On</button>
-            <button class="layout-option" id="borderOff" type="button" data-border="off">Off</button>
+        <div class="toggle-label">
+            <span>Safe border</span>
+            <span class="value" id="borderValue">1.5%</span>
+        </div>
+        <div class="slider-wrap">
+            <input type="range" id="borderSlider" min="0" max="10" step="0.1" value="1.5" aria-label="Safe border percentage" />
+            <span class="slider-value" id="borderSliderValue">1.5%</span>
         </div>
     </div>
 
@@ -185,8 +238,8 @@
     </div>
     <div class="info-text">
         Photos never cropped, never upscaled.<br>
-        Orientation chosen per layout: side‑by‑side → portrait,<br>
-        stacked → landscape. 6×4 · 3600×2400 max.
+        Each photo ≤ half the frame · white space in the centre.<br>
+        6×4 · 3600×2400 max.
     </div>
     <div id="statusMessage" class="status-msg"></div>
 </div>
@@ -211,13 +264,18 @@
         const gapDisplay = document.getElementById('gapDisplay');
         const statusMsg = document.getElementById('statusMessage');
         const layoutBtns = document.querySelectorAll('.layout-option[data-mode]');
-        const borderBtns = document.querySelectorAll('.layout-option[data-border]');
+        const borderSlider = document.getElementById('borderSlider');
+        const borderSliderValue = document.getElementById('borderSliderValue');
+        const borderValue = document.getElementById('borderValue');
 
         let leftImage = null;
         let rightImage = null;
         let pasteTarget = 'left';
         let layoutMode = 'auto';
-        let borderOn = true;
+
+        // Safe border as a fraction of the canvas's short side (0 – 0.10).
+        // Controlled by the slider.
+        let safeBorderFraction = 0.015;
 
         const GAP_PX = 3;
         gapDisplay.textContent = GAP_PX + 'px';
@@ -227,9 +285,6 @@
         const MAX_OUTPUT_HEIGHT = 2400;
         const PREVIEW_MAX_WIDTH = 1200;
         const PREVIEW_MAX_HEIGHT = 800;
-
-        // Halved from 0.03 → 0.015 (1.5% of the short side, ~1/16" on a 4" tall print)
-        const SAFE_MARGIN_FRACTION = 0.015;
 
         function setStatus(text, isError = false) {
             statusMsg.textContent = text;
@@ -259,19 +314,26 @@
             });
             drawPreview();
         }
-        function setBorderMode(on) {
-            borderOn = on;
-            borderBtns.forEach(b => {
-                b.classList.toggle('active', (b.dataset.border === 'on') === on);
-            });
-            drawPreview();
-        }
         layoutBtns.forEach(btn => {
             btn.addEventListener('click', () => setLayoutMode(btn.dataset.mode));
         });
-        borderBtns.forEach(btn => {
-            btn.addEventListener('click', () => setBorderMode(btn.dataset.border === 'on'));
-        });
+
+        // ---- Slider wiring ----
+        function formatPct(f) {
+            // Display like 1.5%, 3%, 0.4%
+            const pct = f * 100;
+            return (Math.round(pct * 10) / 10) + '%';
+        }
+        function applySliderValue() {
+            const pct = parseFloat(borderSlider.value);   // 0 – 10
+            safeBorderFraction = Math.max(0, Math.min(0.10, pct / 100));
+            const label = formatPct(safeBorderFraction);
+            borderSliderValue.textContent = label;
+            borderValue.textContent = label;
+            drawPreview();
+        }
+        borderSlider.addEventListener('input', applySliderValue);
+        applySliderValue();
 
         function clearLeft() {
             revokeImageURL(leftImage);
@@ -429,6 +491,18 @@
         }
 
         // ----- Layout computation -----
+        //  Canvas is always 3:2, sized within maxW × maxH.
+        //  Safe border (scalable, from slider) is applied to all four edges.
+        //  Two photos are laid out in the chosen mode. Their shared dimension
+        //  (height for side, width for stacked) is limited so that neither
+        //  photo exceeds HALF of the canvas in either direction:
+        //     - side-by-side: each photo's width ≤ canvasW/2
+        //     - stacked:      each photo's height ≤ canvasH/2
+        //  The photos are pushed OUTWARD (left photo flush to left safe edge,
+        //  right photo flush to right safe edge; or top/bottom flush), with
+        //  the leftover white space in the CENTRE between them, along with
+        //  the cut-line gap.
+        // ----------------------------------------------------------------
         function computeLayout(maxW, maxH) {
             let canvasW, canvasH;
             if (maxW / maxH > OUTPUT_ASPECT) {
@@ -443,8 +517,7 @@
                 return { canvasW, canvasH, empty: true };
             }
 
-            // Border toggle: zero margin when off.
-            const margin = borderOn ? Math.round(canvasH * SAFE_MARGIN_FRACTION) : 0;
+            const margin = Math.round(canvasH * safeBorderFraction);
             const availW = canvasW - 2 * margin;
             const availH = canvasH - 2 * margin;
 
@@ -455,39 +528,101 @@
                 const rEff = getFootprint(rightImage, rRot);
 
                 if (layout === 'side') {
+                    // Natural widths at equal height = min of the two effective heights.
+                    // But we also cap each photo's width at half the canvas so that
+                    // neither is bigger than half the frame. And we cap the height
+                    // so the photos fit inside the available height.
                     const targetH = Math.min(lEff.height, rEff.height);
-                    const lW = lEff.width  * (targetH / lEff.height);
-                    const rW = rEff.width  * (targetH / rEff.height);
-                    const natTotalW = lW + GAP_PX + rW;
-                    const fit = Math.min(1, availW / natTotalW, availH / targetH);
-                    const dLW = lW * fit;
-                    const dRW = rW * fit;
-                    const dH  = targetH * fit;
-                    const gap = GAP_PX * fit;
+                    let lW = lEff.width  * (targetH / lEff.height);
+                    let rW = rEff.width  * (targetH / rEff.height);
+
+                    // Rule: each photo ≤ half the canvas width.
+                    const maxHalf = canvasW / 2;
+                    let scale = 1;
+                    if (lW > maxHalf) scale = Math.min(scale, maxHalf / lW);
+                    if (rW > maxHalf) scale = Math.min(scale, maxHalf / rW);
+
+                    // Also ensure the pair (lW + rW + gap) fits inside availW — but
+                    // since we push to the edges with a central gap, the pair can
+                    // be at most availW. If they fit, great; if not, shrink.
+                    const pairW = (lW + rW) * scale;
+                    if (pairW > availW) scale *= availW / pairW;
+
+                    // Also ensure height ≤ availH.
+                    if (targetH * scale > availH) scale *= availH / (targetH * scale);
+
+                    const dLW = lW * scale;
+                    const dRW = rW * scale;
+                    const dH  = targetH * scale;
+                    const gap = GAP_PX * scale;
+
+                    // Left photo flush to left safe edge, right photo flush to
+                    // right safe edge. White space + cut gap in the centre.
                     const totalW = dLW + gap + dRW;
+                    const leftover = availW - totalW;
+                    // If leftover > 0, it's in the centre. If it's negative
+                    // (shouldn't happen after scaling), clamp to 0.
+                    const centerExtra = Math.max(0, leftover);
+
+                    // Left photo x = margin. Right photo x = margin + availW - dRW.
+                    const leftX = margin;
+                    const rightX = margin + availW - dRW;
+                    // Vertical: centre each photo's block on the available height.
+                    const y = margin + (availH - dH) / 2;
+
                     return {
                         mode: 'side-by-side',
                         lRot, rRot,
-                        dLW, dRW, dLH: dH, dRH: dH, gap,
-                        totalW, totalH: dH,
+                        leftX, rightX, y,
+                        drawLeftW: dLW, drawRightW: dRW,
+                        drawLeftH: dH,  drawRightH: dH,
+                        gap,
                         area: (dLW * dH) + (dRW * dH)
                     };
                 } else {
+                    // Stacked: equal width = min of two effective widths.
                     const targetW = Math.min(lEff.width, rEff.width);
-                    const lH = lEff.height * (targetW / lEff.width);
-                    const rH = rEff.height * (targetW / rEff.width);
-                    const natTotalH = lH + GAP_PX + rH;
-                    const fit = Math.min(1, availW / targetW, availH / natTotalH);
-                    const dW  = targetW * fit;
-                    const dLH = lH * fit;
-                    const dRH = rH * fit;
-                    const gap = GAP_PX * fit;
+                    let lH = lEff.height * (targetW / lEff.width);
+                    let rH = rEff.height * (targetW / rEff.width);
+
+                    // Rule: each photo ≤ half the canvas height.
+                    const maxHalf = canvasH / 2;
+                    let scale = 1;
+                    if (lH > maxHalf) scale = Math.min(scale, maxHalf / lH);
+                    if (rH > maxHalf) scale = Math.min(scale, maxHalf / rH);
+
+                    // Also ensure the pair (lH + rH + gap) fits inside availH.
+                    const pairH = (lH + rH) * scale;
+                    if (pairH > availH) scale *= availH / pairH;
+
+                    // Also ensure width ≤ availW.
+                    if (targetW * scale > availW) scale *= availW / (targetW * scale);
+
+                    const dW  = targetW * scale;
+                    const dLH = lH * scale;
+                    const dRH = rH * scale;
+                    const gap = GAP_PX * scale;
+
+                    // Top photo flush to top safe edge, bottom photo flush to
+                    // bottom safe edge. White space + cut gap in the centre.
                     const totalH = dLH + gap + dRH;
+                    const leftover = availH - totalH;
+                    const centerExtra = Math.max(0, leftover);
+
+                    // Top photo y = margin. Bottom photo y = margin + availH - dRH.
+                    const topY = margin;
+                    const botY = margin + availH - dRH;
+                    // Horizontal: centre each photo's block on available width.
+                    const x = margin + (availW - dW) / 2;
+
                     return {
                         mode: 'stacked',
                         lRot, rRot,
-                        dLW: dW, dRW: dW, dLH, dRH, gap,
-                        totalW: dW, totalH,
+                        leftX: x, rightX: x,
+                        leftY: topY, rightY: botY,
+                        drawLeftW: dW, drawRightW: dW,
+                        drawLeftH: dLH, drawRightH: dRH,
+                        gap,
                         area: (dW * dLH) + (dW * dRH)
                     };
                 }
@@ -501,38 +636,11 @@
             else if (layoutMode === 'stacked') chosen = stackedCand;
             else                               chosen = (stackedCand.area > sideCand.area) ? stackedCand : sideCand;
 
-            if (chosen.mode === 'side-by-side') {
-                const startX = margin + (availW - chosen.totalW) / 2;
-                const startY = margin + (availH - chosen.totalH) / 2;
-                return {
-                    canvasW, canvasH,
-                    mode: 'side-by-side',
-                    leftX: startX,
-                    rightX: startX + chosen.dLW + chosen.gap,
-                    y: startY,
-                    lRot: chosen.lRot, rRot: chosen.rRot,
-                    drawLeftW: chosen.dLW, drawRightW: chosen.dRW,
-                    drawLeftH: chosen.dLH, drawRightH: chosen.dRH,
-                    gap: chosen.gap,
-                    empty: false
-                };
-            } else {
-                const startX = margin + (availW - chosen.totalW) / 2;
-                const startY = margin + (availH - chosen.totalH) / 2;
-                return {
-                    canvasW, canvasH,
-                    mode: 'stacked',
-                    leftX: startX,
-                    rightX: startX,
-                    leftY: startY,
-                    rightY: startY + chosen.dLH + chosen.gap,
-                    lRot: chosen.lRot, rRot: chosen.rRot,
-                    drawLeftW: chosen.dLW, drawRightW: chosen.dRW,
-                    drawLeftH: chosen.dLH, drawRightH: chosen.dRH,
-                    gap: chosen.gap,
-                    empty: false
-                };
-            }
+            // Attach canvas dimensions for the caller.
+            chosen.canvasW = canvasW;
+            chosen.canvasH = canvasH;
+            chosen.empty = false;
+            return chosen;
         }
 
         function drawPreview() {
@@ -604,8 +712,7 @@
                 document.body.removeChild(link);
                 setTimeout(() => URL.revokeObjectURL(blobUrl), 200);
                 const modeLabel = layout.mode === 'stacked' ? 'stacked' : 'side‑by‑side';
-                const borderLabel = borderOn ? 'border' : 'no border';
-                setStatus(`✓ Exported ${layout.canvasW} × ${layout.canvasH} px (${modeLabel}, ${borderLabel})`);
+                setStatus(`✓ Exported ${layout.canvasW} × ${layout.canvasH} px (${modeLabel})`);
                 setTimeout(() => setStatus(''), 3000);
             }, 'image/jpeg', 1.0);
         }
@@ -673,7 +780,6 @@
 
         setPasteTarget('left');
         setLayoutMode('auto');
-        setBorderMode(true);
     })();
 </script>
 
