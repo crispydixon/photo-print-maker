@@ -3,12 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>2‑up photo layout · print & save</title>
+    <title>2b1 · photo layout</title>
 
     <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="2-up Photo">
+    <meta name="apple-mobile-web-app-title" content="2b1">
     <meta name="theme-color" content="#007aff">
 
     <style>
@@ -103,7 +106,6 @@
         }
         .layout-option:active { opacity: 0.7; }
 
-        /* Slider */
         .slider-wrap {
             background: #f2f2f7;
             border-radius: 14px;
@@ -184,7 +186,7 @@
 </head>
 <body>
 <div class="app">
-    <h1>2‑up photo</h1>
+    <h1>2b1</h1>
     <div class="subhead">6×4 · outer‑edge · gap in middle</div>
 
     <div class="upload-row">
@@ -273,8 +275,6 @@
         let pasteTarget = 'left';
         let layoutMode = 'auto';
 
-        // Safe border as a fraction of the canvas's short side (0 – 0.10).
-        // Controlled by the slider.
         let safeBorderFraction = 0.015;
 
         const GAP_PX = 3;
@@ -318,14 +318,12 @@
             btn.addEventListener('click', () => setLayoutMode(btn.dataset.mode));
         });
 
-        // ---- Slider wiring ----
         function formatPct(f) {
-            // Display like 1.5%, 3%, 0.4%
             const pct = f * 100;
             return (Math.round(pct * 10) / 10) + '%';
         }
         function applySliderValue() {
-            const pct = parseFloat(borderSlider.value);   // 0 – 10
+            const pct = parseFloat(borderSlider.value);
             safeBorderFraction = Math.max(0, Math.min(0.10, pct / 100));
             const label = formatPct(safeBorderFraction);
             borderSliderValue.textContent = label;
@@ -466,7 +464,6 @@
             else if (target === 'right' && !leftImage) setPasteTarget('left');
         }
 
-        // ----- Orientation-aware drawing -----
         function getFootprint(img, rotate) {
             return rotate
                 ? { width: img.height, height: img.width }
@@ -490,19 +487,6 @@
             ctx.restore();
         }
 
-        // ----- Layout computation -----
-        //  Canvas is always 3:2, sized within maxW × maxH.
-        //  Safe border (scalable, from slider) is applied to all four edges.
-        //  Two photos are laid out in the chosen mode. Their shared dimension
-        //  (height for side, width for stacked) is limited so that neither
-        //  photo exceeds HALF of the canvas in either direction:
-        //     - side-by-side: each photo's width ≤ canvasW/2
-        //     - stacked:      each photo's height ≤ canvasH/2
-        //  The photos are pushed OUTWARD (left photo flush to left safe edge,
-        //  right photo flush to right safe edge; or top/bottom flush), with
-        //  the leftover white space in the CENTRE between them, along with
-        //  the cut-line gap.
-        // ----------------------------------------------------------------
         function computeLayout(maxW, maxH) {
             let canvasW, canvasH;
             if (maxW / maxH > OUTPUT_ASPECT) {
@@ -528,27 +512,18 @@
                 const rEff = getFootprint(rightImage, rRot);
 
                 if (layout === 'side') {
-                    // Natural widths at equal height = min of the two effective heights.
-                    // But we also cap each photo's width at half the canvas so that
-                    // neither is bigger than half the frame. And we cap the height
-                    // so the photos fit inside the available height.
                     const targetH = Math.min(lEff.height, rEff.height);
                     let lW = lEff.width  * (targetH / lEff.height);
                     let rW = rEff.width  * (targetH / rEff.height);
 
-                    // Rule: each photo ≤ half the canvas width.
                     const maxHalf = canvasW / 2;
                     let scale = 1;
                     if (lW > maxHalf) scale = Math.min(scale, maxHalf / lW);
                     if (rW > maxHalf) scale = Math.min(scale, maxHalf / rW);
 
-                    // Also ensure the pair (lW + rW + gap) fits inside availW — but
-                    // since we push to the edges with a central gap, the pair can
-                    // be at most availW. If they fit, great; if not, shrink.
                     const pairW = (lW + rW) * scale;
                     if (pairW > availW) scale *= availW / pairW;
 
-                    // Also ensure height ≤ availH.
                     if (targetH * scale > availH) scale *= availH / (targetH * scale);
 
                     const dLW = lW * scale;
@@ -556,18 +531,8 @@
                     const dH  = targetH * scale;
                     const gap = GAP_PX * scale;
 
-                    // Left photo flush to left safe edge, right photo flush to
-                    // right safe edge. White space + cut gap in the centre.
-                    const totalW = dLW + gap + dRW;
-                    const leftover = availW - totalW;
-                    // If leftover > 0, it's in the centre. If it's negative
-                    // (shouldn't happen after scaling), clamp to 0.
-                    const centerExtra = Math.max(0, leftover);
-
-                    // Left photo x = margin. Right photo x = margin + availW - dRW.
                     const leftX = margin;
                     const rightX = margin + availW - dRW;
-                    // Vertical: centre each photo's block on the available height.
                     const y = margin + (availH - dH) / 2;
 
                     return {
@@ -580,22 +545,18 @@
                         area: (dLW * dH) + (dRW * dH)
                     };
                 } else {
-                    // Stacked: equal width = min of two effective widths.
                     const targetW = Math.min(lEff.width, rEff.width);
                     let lH = lEff.height * (targetW / lEff.width);
                     let rH = rEff.height * (targetW / rEff.width);
 
-                    // Rule: each photo ≤ half the canvas height.
                     const maxHalf = canvasH / 2;
                     let scale = 1;
                     if (lH > maxHalf) scale = Math.min(scale, maxHalf / lH);
                     if (rH > maxHalf) scale = Math.min(scale, maxHalf / rH);
 
-                    // Also ensure the pair (lH + rH + gap) fits inside availH.
                     const pairH = (lH + rH) * scale;
                     if (pairH > availH) scale *= availH / pairH;
 
-                    // Also ensure width ≤ availW.
                     if (targetW * scale > availW) scale *= availW / (targetW * scale);
 
                     const dW  = targetW * scale;
@@ -603,16 +564,8 @@
                     const dRH = rH * scale;
                     const gap = GAP_PX * scale;
 
-                    // Top photo flush to top safe edge, bottom photo flush to
-                    // bottom safe edge. White space + cut gap in the centre.
-                    const totalH = dLH + gap + dRH;
-                    const leftover = availH - totalH;
-                    const centerExtra = Math.max(0, leftover);
-
-                    // Top photo y = margin. Bottom photo y = margin + availH - dRH.
                     const topY = margin;
                     const botY = margin + availH - dRH;
-                    // Horizontal: centre each photo's block on available width.
                     const x = margin + (availW - dW) / 2;
 
                     return {
@@ -636,7 +589,6 @@
             else if (layoutMode === 'stacked') chosen = stackedCand;
             else                               chosen = (stackedCand.area > sideCand.area) ? stackedCand : sideCand;
 
-            // Attach canvas dimensions for the caller.
             chosen.canvasW = canvasW;
             chosen.canvasH = canvasH;
             chosen.empty = false;
@@ -696,7 +648,7 @@
             }
 
             const timestamp = new Date().toISOString().slice(0,19).replace(/[:T]/g, '-');
-            const filename = `2up-6x4-${timestamp}.jpg`;
+            const filename = `2b1-6x4-${timestamp}.jpg`;
 
             fullCanvas.toBlob(function(blob) {
                 if (!blob) {
