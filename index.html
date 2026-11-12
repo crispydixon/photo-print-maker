@@ -218,11 +218,11 @@
     <div class="toggle-row">
         <div class="toggle-label">
             <span>Safe border</span>
-            <span class="value" id="borderValue">2.5%</span>
+            <span class="value" id="borderValue">1.5%</span>
         </div>
         <div class="slider-wrap">
-            <input type="range" id="borderSlider" min="0" max="10" step="0.1" value="2.5" aria-label="Safe border percentage" />
-            <span class="slider-value" id="borderSliderValue">2.5%</span>
+            <input type="range" id="borderSlider" min="0" max="10" step="0.1" value="1.5" aria-label="Safe border percentage" />
+            <span class="slider-value" id="borderSliderValue">1.5%</span>
         </div>
     </div>
 
@@ -240,8 +240,8 @@
     </div>
     <div class="info-text">
         Photos never cropped, never upscaled.<br>
-        Each photo ≤ half the frame · white space in the centre.<br>
-        6×4 · 3600×2400 max.
+        Larger photo is scaled down to match the smaller.<br>
+        6×4 frame sized to fit · native resolution.
     </div>
     <div id="statusMessage" class="status-msg"></div>
 </div>
@@ -274,17 +274,14 @@
         let rightImage = null;
         let pasteTarget = 'left';
         let layoutMode = 'auto';
-        let safeBorderFraction = 0.025;
+        let safeBorderFraction = 0.015;
 
         const GAP_PX = 3;
         gapDisplay.textContent = GAP_PX + 'px';
 
         const OUTPUT_ASPECT = 3 / 2;
-        // Restored to full 3600x2400 resolution
-        const MAX_OUTPUT_WIDTH  = 3600;
-        const MAX_OUTPUT_HEIGHT = 2400;
+        const MAX_CANVAS_PIXELS = 16000000;   // safety cap for iOS canvas limits
         const PREVIEW_MAX_WIDTH = 1200;
-        const PREVIEW_MAX_HEIGHT = 800;
 
         function setStatus(text, isError = false) {
             statusMsg.textContent = text;
@@ -469,6 +466,7 @@
                 ? { width: img.height, height: img.width }
                 : { width: img.width,  height: img.height };
         }
+        // Auto-rotate: side-by-side wants portrait photos, stacked wants landscape
         function bestRotationForLayout(img, layout) {
             const naturalLandscape = img.width > img.height;
             if (layout === 'side')     return naturalLandscape;
@@ -487,23 +485,13 @@
             ctx.restore();
         }
 
-        function computeLayout(maxW, maxH) {
-            let canvasW, canvasH;
-            if (maxW / maxH > OUTPUT_ASPECT) {
-                canvasH = maxH;
-                canvasW = Math.round(canvasH * OUTPUT_ASPECT);
-            } else {
-                canvasW = maxW;
-                canvasH = Math.round(canvasW / OUTPUT_ASPECT);
-            }
-
+        function computeLayout() {
             if (!leftImage || !rightImage) {
-                return { canvasW, canvasH, empty: true };
+                return { canvasW: 1500, canvasH: 1000, empty: true };
             }
 
-            const margin = Math.round(canvasH * safeBorderFraction);
-            const availW = canvasW - 2 * margin;
-            const availH = canvasH - 2 * margin;
+            const f = safeBorderFraction;
+            const gap = GAP_PX;
 
             function buildCandidate(layout) {
                 const lRot = bestRotationForLayout(leftImage, layout);
@@ -511,99 +499,87 @@
                 const lEff = getFootprint(leftImage, lRot);
                 const rEff = getFootprint(rightImage, rRot);
 
+                let l, r, H;
                 if (layout === 'side') {
-                    const targetH = Math.min(lEff.height, rEff.height);
-                    let lW = lEff.width  * (targetH / lEff.height);
-                    let rW = rEff.width  * (targetH / rEff.height);
-
-                    const maxHalf = canvasW / 2;
-                    let scale = 1;
-                    if (lW > maxHalf) scale = Math.min(scale, maxHalf / lW);
-                    if (rW > maxHalf) scale = Math.min(scale, maxHalf / rW);
-                    
-                    const pairW = (lW + rW) * scale;
-                    if (pairW > availW) scale *= availW / pairW;
-                    if (targetH * scale > availH) scale *= availH / (targetH * scale);
-
-                    const dLW = lW * scale;
-                    const dRW = rW * scale;
-                    const dH  = targetH * scale;
-                    const gap = GAP_PX * scale;
-
-                    const leftX = margin;
-                    const rightX = margin + availW - dRW;
-                    const y = margin + (availH - dH) / 2;
-
-                    return {
-                        mode: 'side-by-side',
-                        lRot, rRot,
-                        leftX, rightX, y,
-                        drawLeftW: dLW, drawRightW: dRW,
-                        drawLeftH: dH,  drawRightH: dH,
-                        gap,
-                        area: (dLW * dH) + (dRW * dH)
-                    };
+                    // Match heights to the smaller photo (larger one is downscaled)
+                    const h = Math.min(lEff.height, rEff.height);
+                    l = { w: lEff.width * h / lEff.height, h };
+                    r = { w: rEff.width * h / rEff.height, h };
+                    const needW = 2 * Math.max(l.w, r.w) + gap;   // each photo <= half
+                    H = Math.max(h / (1 - 2 * f), needW / (OUTPUT_ASPECT - 2 * f));
                 } else {
-                    const targetW = Math.min(lEff.width, rEff.width);
-                    let lH = lEff.height * (targetW / lEff.width);
-                    let rH = rEff.height * (targetW / rEff.width);
-
-                    const maxHalf = canvasH / 2;
-                    let scale = 1;
-                    if (lH > maxHalf) scale = Math.min(scale, maxHalf / lH);
-                    if (rH > maxHalf) scale = Math.min(scale, maxHalf / rH);
-                    
-                    const pairH = (lH + rH) * scale;
-                    if (pairH > availH) scale *= availH / pairH;
-                    if (targetW * scale > availW) scale *= availW / (targetW * scale);
-
-                    const dW  = targetW * scale;
-                    const dLH = lH * scale;
-                    const dRH = rH * scale;
-                    const gap = GAP_PX * scale;
-
-                    const topY = margin;
-                    const botY = margin + availH - dRH;
-                    const x = margin + (availW - dW) / 2;
-
-                    return {
-                        mode: 'stacked',
-                        lRot, rRot,
-                        leftX: x, rightX: x,
-                        leftY: topY, rightY: botY,
-                        drawLeftW: dW, drawRightW: dW,
-                        drawLeftH: dLH, drawRightH: dRH,
-                        gap,
-                        area: (dW * dLH) + (dW * dRH)
-                    };
+                    // Match widths to the smaller photo
+                    const w = Math.min(lEff.width, rEff.width);
+                    l = { w, h: lEff.height * w / lEff.width };
+                    r = { w, h: rEff.height * w / rEff.width };
+                    const needH = 2 * Math.max(l.h, r.h) + gap;   // each photo <= half
+                    H = Math.max(needH / (1 - 2 * f), w / (OUTPUT_ASPECT - 2 * f));
                 }
+
+                // Exact 3:2 canvas, even height so width is an integer
+                H = Math.ceil(H / 2) * 2;
+                const W = H * OUTPUT_ASPECT;
+                const m = f * H;
+
+                // Positions: photos pushed to the outer edges
+                const availW = W - 2 * m;
+                const availH = H - 2 * m;
+                let leftX, rightX, leftY, rightY;
+                if (layout === 'side') {
+                    leftX  = m;
+                    rightX = m + availW - r.w;
+                    leftY  = m + (availH - l.h) / 2;
+                    rightY = m + (availH - r.h) / 2;
+                } else {
+                    leftX  = m + (availW - l.w) / 2;
+                    rightX = m + (availW - r.w) / 2;
+                    leftY  = m;
+                    rightY = m + availH - r.h;
+                }
+
+                const coverage = (l.w * l.h + r.w * r.h) / (W * H);
+
+                // Only shrink if the canvas would exceed the browser limit
+                let k = 1;
+                if (W * H > MAX_CANVAS_PIXELS) k = Math.sqrt(MAX_CANVAS_PIXELS / (W * H));
+
+                return {
+                    mode: layout === 'side' ? 'side-by-side' : 'stacked',
+                    lRot, rRot,
+                    leftX: leftX * k,   rightX: rightX * k,
+                    leftY: leftY * k,   rightY: rightY * k,
+                    drawLeftW:  l.w * k, drawLeftH:  l.h * k,
+                    drawRightW: r.w * k, drawRightH: r.h * k,
+                    gap: gap * k,
+                    canvasW: Math.round(W * k),
+                    canvasH: Math.round(H * k),
+                    coverage,
+                    empty: false
+                };
             }
 
             const sideCand    = buildCandidate('side');
             const stackedCand = buildCandidate('stacked');
 
-            let chosen;
-            if (layoutMode === 'side')         chosen = sideCand;
-            else if (layoutMode === 'stacked') chosen = stackedCand;
-            else                               chosen = (stackedCand.area > sideCand.area) ? stackedCand : sideCand;
+            if (layoutMode === 'side')    return sideCand;
+            if (layoutMode === 'stacked') return stackedCand;
+            return stackedCand.coverage > sideCand.coverage ? stackedCand : sideCand;
+        }
 
-            chosen.canvasW = canvasW;
-            chosen.canvasH = canvasH;
-            chosen.empty = false;
-            return chosen;
+        function drawLayout(c, layout) {
+            drawImageOriented(c, leftImage,  layout.leftX,  layout.leftY,  layout.drawLeftW,  layout.drawLeftH,  layout.lRot);
+            drawImageOriented(c, rightImage, layout.rightX, layout.rightY, layout.drawRightW, layout.drawRightH, layout.rRot);
         }
 
         function drawPreview() {
-            // Layout always computed at full output size
-            const layout = computeLayout(MAX_OUTPUT_WIDTH, MAX_OUTPUT_HEIGHT);
-
-            // Preview is just a scaled-down view of it
+            // Layout is computed at real output size; preview is a scaled-down copy
+            const layout = computeLayout();
             const k = PREVIEW_MAX_WIDTH / layout.canvasW;
+
             previewCanvas.width  = Math.round(layout.canvasW * k);
             previewCanvas.height = Math.round(layout.canvasH * k);
 
             ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.imageSmoothingQuality = 'high';
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
 
@@ -617,15 +593,8 @@
             }
 
             ctx.setTransform(k, 0, 0, k, 0, 0);
-
-            if (layout.mode === 'side-by-side') {
-                drawImageOriented(ctx, leftImage,  layout.leftX,  layout.y, layout.drawLeftW,  layout.drawLeftH,  layout.lRot);
-                drawImageOriented(ctx, rightImage, layout.rightX, layout.y, layout.drawRightW, layout.drawRightH, layout.rRot);
-            } else {
-                drawImageOriented(ctx, leftImage,  layout.leftX,  layout.leftY,  layout.drawLeftW,  layout.drawLeftH,  layout.lRot);
-                drawImageOriented(ctx, rightImage, layout.rightX, layout.rightY, layout.drawRightW, layout.drawRightH, layout.rRot);
-            }
-            
+            ctx.imageSmoothingQuality = 'high';
+            drawLayout(ctx, layout);
             ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
 
@@ -635,7 +604,7 @@
                 return;
             }
 
-            const layout = computeLayout(MAX_OUTPUT_WIDTH, MAX_OUTPUT_HEIGHT);
+            const layout = computeLayout();
 
             const fullCanvas = document.createElement('canvas');
             fullCanvas.width  = layout.canvasW;
@@ -644,14 +613,8 @@
 
             fullCtx.fillStyle = '#ffffff';
             fullCtx.fillRect(0, 0, layout.canvasW, layout.canvasH);
-
-            if (layout.mode === 'side-by-side') {
-                drawImageOriented(fullCtx, leftImage,  layout.leftX,  layout.y, layout.drawLeftW,  layout.drawLeftH,  layout.lRot);
-                drawImageOriented(fullCtx, rightImage, layout.rightX, layout.y, layout.drawRightW, layout.drawRightH, layout.rRot);
-            } else {
-                drawImageOriented(fullCtx, leftImage,  layout.leftX,  layout.leftY,  layout.drawLeftW,  layout.drawLeftH,  layout.lRot);
-                drawImageOriented(fullCtx, rightImage, layout.rightX, layout.rightY, layout.drawRightW, layout.drawRightH, layout.rRot);
-            }
+            fullCtx.imageSmoothingQuality = 'high';
+            drawLayout(fullCtx, layout);
 
             const timestamp = new Date().toISOString().slice(0,19).replace(/[:T]/g, '-');
             const filename = `2b1-6x4-${timestamp}.jpg`;
