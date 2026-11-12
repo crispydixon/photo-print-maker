@@ -274,7 +274,6 @@
         let rightImage = null;
         let pasteTarget = 'left';
         let layoutMode = 'auto';
-
         let safeBorderFraction = 0.015;
 
         const GAP_PX = 3;
@@ -512,15 +511,18 @@
                 const rEff = getFootprint(rightImage, rRot);
 
                 if (layout === 'side') {
+                    // 1. Match heights to the smaller photo
                     const targetH = Math.min(lEff.height, rEff.height);
                     let lW = lEff.width  * (targetH / lEff.height);
                     let rW = rEff.width  * (targetH / rEff.height);
 
+                    // 2. Enforce the "≤ half canvas width" rule
                     const maxHalf = canvasW / 2;
                     let scale = 1;
                     if (lW > maxHalf) scale = Math.min(scale, maxHalf / lW);
                     if (rW > maxHalf) scale = Math.min(scale, maxHalf / rW);
 
+                    // 3. Fit inside available area
                     const pairW = (lW + rW) * scale;
                     if (pairW > availW) scale *= availW / pairW;
 
@@ -531,6 +533,7 @@
                     const dH  = targetH * scale;
                     const gap = GAP_PX * scale;
 
+                    // 4. Push outward
                     const leftX = margin;
                     const rightX = margin + availW - dRW;
                     const y = margin + (availH - dH) / 2;
@@ -545,15 +548,18 @@
                         area: (dLW * dH) + (dRW * dH)
                     };
                 } else {
+                    // 1. Match widths to the smaller photo
                     const targetW = Math.min(lEff.width, rEff.width);
                     let lH = lEff.height * (targetW / lEff.width);
                     let rH = rEff.height * (targetW / rEff.width);
 
+                    // 2. Enforce the "≤ half canvas height" rule
                     const maxHalf = canvasH / 2;
                     let scale = 1;
                     if (lH > maxHalf) scale = Math.min(scale, maxHalf / lH);
                     if (rH > maxHalf) scale = Math.min(scale, maxHalf / rH);
 
+                    // 3. Fit inside available area
                     const pairH = (lH + rH) * scale;
                     if (pairH > availH) scale *= availH / pairH;
 
@@ -564,6 +570,7 @@
                     const dRH = rH * scale;
                     const gap = GAP_PX * scale;
 
+                    // 4. Push outward
                     const topY = margin;
                     const botY = margin + availH - dRH;
                     const x = margin + (availW - dW) / 2;
