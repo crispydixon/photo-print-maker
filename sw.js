@@ -1,5 +1,5 @@
 javascript
-const CACHE = '2b1-v2';
+const CACHE = '2b1-v3';
 const ASSETS = [
   './',
   './index.html',
